@@ -1,0 +1,22 @@
+{
+  "name": "brewlang",
+  "version": "0.1.0",
+  "description": "CoffeeScript-style language that transpiles to JS with auto-generated types.js",
+  "bin": { "brew": "dist/cli.js" },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsup src/index.ts src/cli.ts --format cjs --dts",
+    "dev": "ts-node src/cli.ts",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "commander": "^11.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "ts-node": "^10.9.2",
+    "tsup": "^8.0.0",
+    "typescript": "^5.3.0"
+  }
+}

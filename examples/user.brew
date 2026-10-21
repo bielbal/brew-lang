@@ -1,0 +1,36 @@
+# User model example in Brew
+
+export class User extends EventEmitter
+  name: String
+  age: Number
+  roles: Array
+
+  fn constructor(name: String, age: Number)
+    @name = name
+    @age = age
+    @roles = []
+
+  fn greet() -> String
+    "Hello, I'm #{@name} and I'm #{@age} years old"
+
+  fn addRole(role: String)
+    @roles.push(role)
+
+  fn hasRole(role: String) -> Boolean
+    @roles.includes(role)
+
+  fn toJSON() -> Object
+    { name: @name, age: @age, roles: @roles }
+
+
+export fn createUser(name: String, age: Number) -> Object
+  new User(name, age)
+
+
+fn validateAge(age: Number) -> Boolean
+  age >= 0 and age <= 150
+
+
+# Utility: format name
+fn formatName(first: String, last: String) -> String
+  "#{first} #{last}"
