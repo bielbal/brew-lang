@@ -1,80 +1,83 @@
 #!/usr/bin/env node
-import { Command } from "commander";
 import * as fs from "fs";
 import * as path from "path";
-import { compile } from "./index";
+import * as readline from "readline";
+import { lex }         from "./lexer";
+import { parse }       from "./parser";
+import { Interpreter } from "./interpreter";
+import { rubyInspect } from "./object";
 
-const program = new Command();
+const args = process.argv.slice(2);
 
-program
-    .name("brew")
-    .description("Brew language transpiler — compiles .brew files to .js + types.js")
-    .version("0.1.0");
+if (args[0] === "--tokens" && args[1]) {
+  const src = fs.readFileSync(args[1], "utf8");
+  for (const t of lex(src)) console.log(`${t.kind.padEnd(16)} ${JSON.stringify(t.value)}`);
+  process.exit(0);
+}
 
-program
-    .command("compile <files...>")
-    .alias("c")
-    .description("Compile .brew files to JavaScript")
-    .option("-o, --out <dir>", "Output directory", ".")
-    .option("--no-types", "Skip generating types.js")
-    .option("--shared-types", "Generate a single shared types.js instead of one per file")
-    .action((files: string[], opts: { out: string; types: boolean; sharedTypes: boolean }) => {
-        const outDir = path.resolve(opts.out);
-        if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
+if (args[0] === "--ast" && args[1]) {
+  const src = fs.readFileSync(args[1], "utf8");
+  console.log(JSON.stringify(parse(src), null, 2));
+  process.exit(0);
+}
 
-        const allTypeNames = new Set<string>();
+if (args[0] === "-e" && args[1]) {
+  const interp = new Interpreter();
+  try {
+    const ast = parse(args[1]);
+    interp.run(ast);
+  } catch (e) { console.error((e as Error).message); process.exit(1); }
+  process.exit(0);
+}
 
-        for (const file of files) {
-            const src = fs.readFileSync(path.resolve(file), "utf-8");
-            const basename = path.basename(file, ".brew");
+if (args.length > 0 && !args[0].startsWith("-")) {
+  const file = args[0];
+  if (!fs.existsSync(file)) { console.error(`File not found: ${file}`); process.exit(1); }
+  const src = fs.readFileSync(file, "utf8");
+  const interp = new Interpreter();
+  interp.globalEnv.setLocal("__FILE__", { type:"string", value:path.resolve(file) });
+  interp.globalEnv.setLocal("__DIR__",  { type:"string", value:path.dirname(path.resolve(file)) });
+  try {
+    const ast = parse(src);
+    interp.run(ast);
+  } catch (e) { console.error(`Error: ${(e as Error).message}`); process.exit(1); }
+  process.exit(0);
+}
 
-            try {
-                const result = compile(src);
+// REPL
+const interp = new Interpreter();
+console.log("Brew 2.0 – Ruby-like interpreter (TypeScript)");
+console.log("Type 'exit' or Ctrl+D to quit.\n");
 
-                // Write .js
-                const jsPath = path.join(outDir, basename + ".js");
-                const header = opts.sharedTypes
-                    ? `import { Types } from './types.js';\n\n`
-                    : opts.types
-                        ? `import { Types } from './${basename}.types.js';\n\n`
-                        : "";
-                fs.writeFileSync(jsPath, header + result.js, "utf-8");
-                console.log(`✓ ${file} → ${path.relative(".", jsPath)}`);
+const rl = readline.createInterface({ input: process.stdin, output: process.stdout, prompt: ">> " });
+let buf = "";
 
-                if (!opts.sharedTypes && opts.types && result.typeNames.size > 0) {
-                    // Per-file types
-                    const typesPath = path.join(outDir, basename + ".types.js");
-                    fs.writeFileSync(typesPath, result.types, "utf-8");
-                    console.log(`  + ${path.relative(".", typesPath)} (${result.typeNames.size} types)`);
-                }
+rl.prompt();
+rl.on("line", (line: string) => {
+  if (line.trim() === "exit") { console.log("Bye!"); process.exit(0); }
 
-                result.typeNames.forEach((t) => allTypeNames.add(t));
-            } catch (e) {
-                console.error(`✗ ${file}: ${(e as Error).message}`);
-                process.exit(1);
-            }
-        }
+  buf += (buf ? "\n" : "") + line;
 
-        // Shared types.js
-        if (opts.sharedTypes && allTypeNames.size > 0) {
-            const { generateTypesFile } = require("./typegen");
-            const typesPath = path.join(outDir, "types.js");
-            fs.writeFileSync(typesPath, generateTypesFile(allTypeNames), "utf-8");
-            console.log(`\n→ types.js (${allTypeNames.size} types): ${path.relative(".", typesPath)}`);
-        }
-    });
+  // try to parse; if incomplete keep buffering
+  try {
+    const ast = parse(buf);
+    const result = interp.run(ast);
+    if (buf.trim()) console.log("=> " + rubyInspect(result));
+    buf = "";
+  } catch (e) {
+    const msg = (e as Error).message;
+    // if it looks like an incomplete expression, keep buffering
+    if (msg.includes("Expected") || msg.includes("Unexpected token: EOF")) {
+      rl.setPrompt(".. ");
+      rl.prompt();
+      return;
+    }
+    console.error("Error: " + msg);
+    buf = "";
+  }
 
-program
-    .command("print <file>")
-    .description("Print the transpiled JS to stdout without writing files")
-    .action((file: string) => {
-        const src = fs.readFileSync(path.resolve(file), "utf-8");
-        const { js, types, typeNames } = compile(src);
-        console.log("// ===== types.js =====");
-        console.log(types);
-        console.log("\n// ===== " + path.basename(file, ".brew") + ".js =====");
-        console.log(js);
-        void typeNames;
-    });
+  rl.setPrompt(">> ");
+  rl.prompt();
+});
 
-program.parse();
+rl.on("close", () => { console.log("\nBye!"); process.exit(0); });
